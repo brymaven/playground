@@ -21,6 +21,7 @@ library
                , containers
                , cryptonite
                , foundation
+               , lens
                , memory
                , network
                , servant
