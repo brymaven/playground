@@ -1,6 +1,6 @@
 name:                playground
-version:             0.1.0.0
-description:         Playground space for
+version:             0.1
+description:         Playground space
 homepage:            https://github.com/brymaven/playground
 license:             MIT
 license-file:        LICENSE
@@ -25,6 +25,8 @@ library
                , network
                , servant
                , time
+  exposed-modules: Playground
+  other-modules: Playground.Types
 
 executable playground-exe
   hs-source-dirs:      app
