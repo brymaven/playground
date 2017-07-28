@@ -20,14 +20,17 @@ library
                , bytestring
                , containers
                , cryptonite
+               , data-default
                , foundation
                , lens
                , memory
+               , mtl
                , network
                , servant
+               , split
                , time
-  exposed-modules: Playground
-  other-modules: Playground.Types
+  exposed-modules: Playground, Playground.Exercises
+  other-modules: Playground.Types, Playground.Policies
 
 executable playground-exe
   hs-source-dirs:      app
