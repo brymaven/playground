@@ -1,15 +1,25 @@
 module Playground.Exercises where
 
+import GHC.Err (errorWithoutStackTrace)
+
 import Control.Arrow ((&&&))
 import Control.Lens
 import Control.Lens.Tuple
 import Control.Monad (forever, msum)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State
+import Data.Foldable (traverse_)
+import Data.List.Split (chunksOf)
+import Data.List (elemIndices, maximumBy)
 
 import Data.Map (Map)
+import Data.Maybe (isJust)
 import qualified Data.Map as M
 
 import Data.Maybe (catMaybes)
+import Data.Ord (comparing)
+
+import System.Random
 
 -- | (x, y
 type Move = (Int, Int, Player)
@@ -29,10 +39,12 @@ data Player
 -- | 3, 4, 5 |
 -- | 6, 7, 8 |
 type Board = [Player]
-getWinner :: [[Player]] -> Maybe Player
+
+getWinner :: Board -> Maybe Player
 getWinner =
   msum .
-  concat . sequence [map wonSeq, map wonSeq . columns, leftDiag, rightDiag]
+  concat .
+  sequence [map wonSeq, map wonSeq . columns, leftDiag, rightDiag] . chunksOf 3
   where
     columns = sequence (map (map . (flip (!!))) [0, 1, 2])
     getIdx idx = pure . wonSeq . catMaybes . sequence (map (flip (^?)) idx)
@@ -42,9 +54,12 @@ getWinner =
     wonSeq [O, O, O] = Just O
     wonSeq _ = Nothing
 
+hasWinner :: Board -> Bool
+hasWinner = isJust . getWinner
+
 -- Just some test board they're testing with
 testBoard :: Board
-testBoard = concat [[None, O, None], [None, None, None], [None, O, None]]
+testBoard = concat [[None, X, None], [None, O, None], [None, X, None]]
 
 -- You can use the same data to build the training model
 -- Once you get data that you can use data to do it
@@ -56,52 +71,98 @@ hashBoard = foldl ((+) . (* 3)) 0 . map hashPlayer
     hashPlayer O = 2
     hashPlayer None = 0
 
--- foldl (\acc i -> (3 * acc) + i) 0 [1,2,3,6]
+type TicTacToe = Map Int Double
 -- data TicTacToe = TicTacToe {
 --       board :: Board
 --     }
 testState :: State Int Int
 testState
-  -- put 3
  = do
   modify (+ 1)
   get
 
 -- initialState :: Map Int Double
 -- initialState = [()]
-
 -- This is a recursive backtracking problem, so it shouldn't be too difficult.
 -- Every time we find a new state, need to add it to the list though
 
--- allStates :: []
--- allStates
--- No real reason to have 2D array other than convenience right?
+newBoard :: Board
+newBoard = replicate 9 None
 
 
--- nextState :: Board -> Move -> Board
--- nextState board (row, column, player) = Board & element row & element column .~ player
+-- | Initiate map with all states of the game
+-- | All winning states are marked with 1, losing states are marked 0,
+-- | and all other states are marked 0.5
+initStates :: Board -> State TicTacToe ()
+initStates board = do
+  let h = hashBoard board
+  m <- get
 
+  unless (M.member h m) $ do
+    let winningChances = case (getWinner board) of
+                           Just X -> 1
+                           Just O -> 0
+                           _ -> 0.5
+    put (M.insert h winningChances m)
+    traverse_ initStates (getEdges board)
 
+-- | Simple T-D learning method
+updateRule :: StepSize -> Double -> Double -> Double
+updateRule stepSize new old = old + stepSize * (new - old)
 
--- Set up a table of numbers, one for each possible state of the game.
--- Estimate is the state's value and the whole table is the learned value function.z
--- This really will just be a State IO Monad
--- Occassionally, exporatory ratio, select randomly
--- Make the numbers more accurate during the game.
--- "back up" the value of the state after each greedy move
--- The current value of the earlier state is adjusted to be closer to the value of the later state.
--- For exploratory moves, don't need to backup the state.
--- V(s) <- V(s) + alpha [ V(s') - V(s) ]
--- data Reinforcement = Reinforcement {
---       environment :: Int
---     , stepSize :: Double        -- | Learning rate
---     }
--- nextMove :: Reinforcement ()
--- nextMove = j
+type StepSize = Double
+stepSize :: StepSize
+stepSize = 0.05
+
+-- | Selects the next move based on what's has the highest value
+bestMove :: Board -> State TicTacToe Board
+bestMove board = do
+  let hash = hashBoard board
+  m <- get
+  let best = maximumBy (comparing (flip find m . hashBoard)) (getEdges board)
+  put $ M.insertWith (updateRule stepSize) hash 0 m
+  return best
+ where find = M.findWithDefault 0
+
+playGame :: Board -> State TicTacToe ()
+playGame board = do
+  unless (hasWinner board) $ bestMove board >>= playGame
+
+-- randomMove :: Board -> State TicTacToe Board
+-- randomMove board = do
+--   b <- liftIO $ (choice (getEdges board))
+--   return b
+
+-- | Checks the number of empty slots on the board to
+-- find the next player
+nextPlayer :: Board -> Player
+nextPlayer board =
+  if odd (count None board)
+    then X
+    else O
+    -- Board & element row & element column .~ player
+
+-- | Gets all the positions possible from board position
+getEdges :: Board -> [Board]
+getEdges board = do
+  guard $ not (hasWinner board)
+  let player = nextPlayer board
+  s <- elemIndices None board
+  return (board & ix s .~ player)
+
 type Policy = Map Int Double
 
 train :: Int -> Policy
 train _ = M.empty
+
+-- trainRandomly = do
+--   -- gen <- newStdGen
+--   initStates newBoard
+--   loop
+--   return ()
+--  where loop = do
+--    bestMove
+
 
 parseInput :: Int -> IO ()
 parseInput i
@@ -120,3 +181,12 @@ play = loop
       if s == "q"
         then return ()
         else ((parseInput . read) s) >> loop
+
+count :: (Eq a) => a -> [a] -> Int
+count x = length . filter (== x)
+
+choice :: [a] -> IO a
+choice [] = errorWithoutStackTrace "choice: empty list"
+choice xs = do
+  r <- randomRIO (0, (length xs) - 1)
+  return $ xs !! r
