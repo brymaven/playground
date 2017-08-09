@@ -10,7 +10,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State
 import Data.Foldable (traverse_)
 import Data.List.Split (chunksOf)
-import Data.List (elemIndices, maximumBy)
+import Data.List (elemIndices, maximumBy, intercalate)
 
 import Data.Map (Map)
 import Data.Maybe (isJust)
@@ -20,6 +20,7 @@ import Data.Maybe (catMaybes)
 import Data.Ord (comparing)
 
 import System.Random
+import Text.Printf (printf)
 
 -- | (x, y
 type Move = (Int, Int, Player)
@@ -31,20 +32,32 @@ data Player
   = X
   | O
   | None
-  deriving (Eq, Show)
+  deriving (Eq)
+instance Show Player where
+  show X = "X"
+  show O = "O"
+  show None = " "
 
 -- | Board is a 2D representation of a Tic Tac Toe game
 --
 -- | 0, 1, 2 |
 -- | 3, 4, 5 |
 -- | 6, 7, 8 |
-type Board = [Player]
+newtype Board = Board [Player]
+instance Show Board where
+  show = concat . map showRow . chunksOf 3 . toList
+    where showRow :: [Player] -> String
+          showRow = (++) "\n" . intercalate " | " . map show
+
+
+toList :: Board -> [Player]
+toList (Board b) = b
 
 getWinner :: Board -> Maybe Player
 getWinner =
   msum .
   concat .
-  sequence [map wonSeq, map wonSeq . columns, leftDiag, rightDiag] . chunksOf 3
+  sequence [map wonSeq, map wonSeq . columns, leftDiag, rightDiag] . chunksOf 3 . toList
   where
     columns = sequence (map (map . (flip (!!))) [0, 1, 2])
     getIdx idx = pure . wonSeq . catMaybes . sequence (map (flip (^?)) idx)
@@ -59,13 +72,13 @@ hasWinner = isJust . getWinner
 
 -- Just some test board they're testing with
 testBoard :: Board
-testBoard = concat [[None, X, None], [None, O, None], [None, X, None]]
+testBoard = Board (concat [[None, X, None], [None, O, None], [None, X, None]])
 
 -- You can use the same data to build the training model
 -- Once you get data that you can use data to do it
 -- Hashes the board the same way that players are hashed
 hashBoard :: Board -> Int
-hashBoard = foldl ((+) . (* 3)) 0 . map hashPlayer
+hashBoard = foldl ((+) . (* 3)) 0 . map hashPlayer . toList
   where
     hashPlayer X = 1
     hashPlayer O = 2
@@ -87,7 +100,7 @@ testState
 -- Every time we find a new state, need to add it to the list though
 
 newBoard :: Board
-newBoard = replicate 9 None
+newBoard = Board (replicate 9 None)
 
 
 -- | Initiate map with all states of the game
@@ -124,19 +137,29 @@ bestMove board = do
   return best
  where find = M.findWithDefault 0
 
+-- | Makes the nth move of available edges
+manualMove :: Board -> Int -> Board
+manualMove board n = choice n (getEdges board)
+
 playGame :: Board -> State TicTacToe ()
 playGame board = do
   unless (hasWinner board) $ bestMove board >>= playGame
 
--- randomMove :: Board -> State TicTacToe Board
--- randomMove board = do
---   b <- liftIO $ (choice (getEdges board))
---   return b
+-- | Play Game using list of lazy seeds
+playGameTwo :: [Int] -> Board -> State TicTacToe Board
+playGameTwo (x:y:xs) board
+  | hasWinner board = return board
+  | x < 50 = return (manualMove board y) >>= playGameTwo xs
+  | otherwise = bestMove board >>= playGameTwo xs
+
+-- | Play X number of games
+playNGames :: Int -> State TicTacToe ()
+playNGames = flip replicateM_ (playGame newBoard)
 
 -- | Checks the number of empty slots on the board to
 -- find the next player
 nextPlayer :: Board -> Player
-nextPlayer board =
+nextPlayer (Board board) =
   if odd (count None board)
     then X
     else O
@@ -144,11 +167,11 @@ nextPlayer board =
 
 -- | Gets all the positions possible from board position
 getEdges :: Board -> [Board]
-getEdges board = do
-  guard $ not (hasWinner board)
-  let player = nextPlayer board
+getEdges b@(Board board) = do
+  guard $ not (hasWinner b)
+  let player = nextPlayer b
   s <- elemIndices None board
-  return (board & ix s .~ player)
+  return $ Board (board & ix s .~ player)
 
 type Policy = Map Int Double
 
@@ -163,6 +186,9 @@ train _ = M.empty
 --  where loop = do
 --    bestMove
 
+
+getRandoms :: IO [Int]
+getRandoms = take 10 . randomRs (0, 1000) <$> newStdGen
 
 parseInput :: Int -> IO ()
 parseInput i
@@ -185,8 +211,9 @@ play = loop
 count :: (Eq a) => a -> [a] -> Int
 count x = length . filter (== x)
 
-choice :: [a] -> IO a
-choice [] = errorWithoutStackTrace "choice: empty list"
-choice xs = do
-  r <- randomRIO (0, (length xs) - 1)
-  return $ xs !! r
+choice :: Int -> [a] -> a
+choice _ [] = errorWithoutStackTrace "choice: empty list"
+choice n xs = xs !! (mod n (length xs))
+
+sumValues :: TicTacToe -> Double
+sumValues = sum . map snd . M.toList
