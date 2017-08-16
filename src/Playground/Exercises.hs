@@ -153,7 +153,7 @@ playGameTwo (x:y:xs) board
   | otherwise = bestMove board >>= playGameTwo xs
 
 -- | Play X number of games
-playNGames :: Int -> State TicTacToe ()
+playNGames :: [Int] -> Int -> State TicTacToe ()
 playNGames = flip replicateM_ (playGame newBoard)
 
 -- | Checks the number of empty slots on the board to
